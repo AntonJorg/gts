@@ -1,3 +1,5 @@
+import time
+
 from dataclasses import dataclass
 from typing import Callable
 
@@ -23,6 +25,21 @@ type BackdownFunction[T] = Callable[[Node[T]], NodeValue]
 
 type ShouldBackupFunction[T] = Callable[[Node[T]], bool]
 type BackupFunction[T] = Callable[[Node[T], Node[T], list[Node[T]]], NodeValue]
+
+
+class _SearchTimer:
+    def __init__(self):
+        self.timeout = 0.0
+        self.start_time = 0
+
+    def start(self, timeout: float) -> None:
+        self.timeout = timeout
+        self.start_time = time.thread_time_ns()
+
+    def is_timeout(self) -> bool:
+        return time.thread_time_ns() - self.start_time > self.timeout * 1e9
+
+search_timer = _SearchTimer()
 
 
 @dataclass
@@ -54,7 +71,6 @@ def create_search_function[T](sfd: SearchFunctionDefinition[T]) -> SearchFunctio
 
         # tree selection
         node = root
-
         while sfd.should_select(node):
             children = get_children(node)
             node = sfd.select(children)
@@ -66,7 +82,7 @@ def create_search_function[T](sfd: SearchFunctionDefinition[T]) -> SearchFunctio
 
         frontier.push(child)
 
-        if node.is_fully_expanded():
+        if node.is_fully_expanded:
             frontier.remove(node)
 
         return child
@@ -74,29 +90,33 @@ def create_search_function[T](sfd: SearchFunctionDefinition[T]) -> SearchFunctio
     def backpropagate(node: Node[T], values) -> None:
         set_values(node, values)
         node = get_parent(node)
-        while sfd.should_backpropagate(node):
+        while sfd.should_backup(node):
             children = get_children(node)
             values = sfd.backup(children)
             set_values(node, values)
             node = get_parent(node)
 
-    def treesearch(state: State[T]) -> Node[T]:
+    def treesearch(state: State[T]) -> T:
         root = Node[T](state)
 
-        frontier = [root]
+        frontier = sfd.frontier()
+        frontier.push(root)
 
+        search_timer.start(1.0)
+
+        print(root)
         while not sfd.should_terminate(root, frontier):
-            node = select(frontier)
-            child = expand(node)
+            node = select(root, frontier)
+            child = expand(node, frontier)
 
             if sfd.should_evaluate():
-                value = sfd.evaluate(child)
+                value = sfd.evaluate(child.state)
                 backpropagate(child, value)
 
         children = get_children(root)
 
         best_child = max(children, key=sfd.action_value)
 
-        return best_child
+        return best_child[0]
 
     return treesearch
